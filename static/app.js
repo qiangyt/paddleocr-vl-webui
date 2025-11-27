@@ -7,6 +7,8 @@ const PROMPT_TEXT = ""; // Not used in pipeline mode
 let processQueue = [];
 let isProcessing = false;
 let processedResults = [];
+let currentView = 'single';
+let currentTab = 'preview';
 
 // DOM Elements
 const dropZone = document.getElementById('drop-zone');
@@ -25,6 +27,15 @@ const startBtn = document.getElementById('start-btn');
 const chartRecognitionSwitch = document.getElementById('chart-recognition-switch');
 const docUnwarpingSwitch = document.getElementById('doc-unwarping-switch');
 const docOrientationSwitch = document.getElementById('doc-orientation-switch');
+
+// 多页视图元素
+const singleViewBtn = document.getElementById('single-page-btn');
+const multiViewBtn = document.getElementById('multi-page-btn');
+const previewTab = document.getElementById('multi-md-preview-btn');
+const sourceTab = document.getElementById('multi-md-source-btn');
+const multiPageContainer = document.getElementById('multi-page-view');
+const mdPreview = document.getElementById('multi-md-preview');
+const mdSource = document.getElementById('multi-md-source');
 
 // Templates
 const queueItemTemplate = document.getElementById('queue-item-template');
@@ -87,6 +98,48 @@ function setupEventListeners() {
     clearBtn.addEventListener('click', clearQueue);
     downloadAllBtn.addEventListener('click', downloadAllMarkdown);
     startBtn.addEventListener('click', startProcessing);
+
+    // 视图切换（添加空值检查）
+    if (singleViewBtn) singleViewBtn.addEventListener('click', () => switchView('single'));
+    if (multiViewBtn) multiViewBtn.addEventListener('click', () => switchView('multi'));
+    
+    // 标签页切换（添加空值检查）
+    if (previewTab) previewTab.addEventListener('click', () => switchTab('preview'));
+    if (sourceTab) sourceTab.addEventListener('click', () => switchTab('source'));
+
+    // 粘贴图片功能
+    document.addEventListener('paste', handlePaste);
+}
+
+// 处理粘贴事件
+function handlePaste(e) {
+    const items = e.clipboardData.items;
+    if (!items) return;
+
+    const files = [];
+    let hasImage = false;
+
+    for (const item of items) {
+        if (item.type.startsWith('image/')) {
+            hasImage = true;
+            const blob = item.getAsFile();
+            const timestamp = new Date().getTime();
+            const fileName = `paste_${timestamp}.png`;
+            const file = new File([blob], fileName, { type: 'image/png' });
+            files.push(file);
+        }
+    }
+
+    if (hasImage) {
+        e.preventDefault();
+        handleFiles(files);
+        
+        // 显示拖放区域的视觉反馈
+        dropZone.classList.add('drag-over');
+        setTimeout(() => {
+            dropZone.classList.remove('drag-over');
+        }, 500);
+    }
 }
 
 async function handleFiles(files) {
@@ -245,18 +298,23 @@ async function processNextInQueue() {
         }
 
         processedResults.push(item);
-        renderResult(item);
-        
-        // Play a subtle success animation
-        if (el) {
+    renderResult(item);
+    
+    // 更新多页视图
+    if (currentView === 'multi') {
+        updateMultiPageView();
+    }
+    
+    // Play a subtle success animation
+    if (el) {
+        setTimeout(() => {
+            el.style.transition = 'all 0.3s ease';
+            el.style.transform = 'scale(0.98)';
             setTimeout(() => {
-                el.style.transition = 'all 0.3s ease';
-                el.style.transform = 'scale(0.98)';
-                setTimeout(() => {
-                    el.style.transform = 'scale(1)';
-                }, 150);
-            }, 100);
-        }
+                el.style.transform = 'scale(1)';
+            }, 150);
+        }, 100);
+    }
 
     } catch (error) {
         console.error(error);
@@ -354,8 +412,67 @@ function clearQueue() {
             <p>上传文件后，解析结果将在此显示</p>
         </div>
     `;
+    
+    // 清空多页视图（添加空值检查）
+    if (mdPreview) mdPreview.innerHTML = '';
+    if (mdSource) mdSource.value = '';
+    
     queueSection.classList.add('hidden');
     updateQueueProgress();
+}
+
+// 切换视图
+function switchView(view) {
+    currentView = view;
+    
+    if (view === 'single') {
+        if (singleViewBtn) singleViewBtn.classList.add('active');
+        if (multiViewBtn) multiViewBtn.classList.remove('active');
+        resultsContainer.style.display = 'flex';
+        if (multiPageContainer) multiPageContainer.classList.remove('active');
+    } else {
+        if (singleViewBtn) singleViewBtn.classList.remove('active');
+        if (multiViewBtn) multiViewBtn.classList.add('active');
+        resultsContainer.style.display = 'none';
+        if (multiPageContainer) multiPageContainer.classList.add('active');
+        updateMultiPageView();
+    }
+}
+
+// 切换标签页
+function switchTab(tab) {
+    currentTab = tab;
+    
+    if (tab === 'preview') {
+        if (previewTab) previewTab.classList.add('active');
+        if (sourceTab) sourceTab.classList.remove('active');
+        if (mdPreview) mdPreview.classList.add('active');
+        if (mdSource) mdSource.classList.remove('active');
+    } else {
+        if (previewTab) previewTab.classList.remove('active');
+        if (sourceTab) sourceTab.classList.add('active');
+        if (mdPreview) mdPreview.classList.remove('active');
+        if (mdSource) mdSource.classList.add('active');
+    }
+}
+
+// 更新多页视图
+function updateMultiPageView() {
+    if (processedResults.length === 0) {
+        if (mdPreview) mdPreview.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">暂无结果</p>';
+        if (mdSource) mdSource.value = '';
+        return;
+    }
+    
+    // 合并所有结果的Markdown
+    const mergedMarkdown = processedResults.map(result => result.markdown).join('\n\n---\n\n');
+    
+    // 更新预览和源码
+    if (mdPreview) mdPreview.innerHTML = marked.parse(mergedMarkdown);
+    if (mdSource) {
+        const codeElement = mdSource.querySelector('code.markdown');
+        if (codeElement) codeElement.textContent = mergedMarkdown;
+    }
 }
 
 async function downloadAllMarkdown() {
