@@ -92,7 +92,11 @@ function setupEventListeners() {
 
     // File Input
     browseBtn.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+    fileInput.addEventListener('change', (e) => {
+        handleFiles(e.target.files);
+        // Reset file input so same file can be selected again
+        e.target.value = '';
+    });
 
     // Actions
     clearBtn.addEventListener('click', clearQueue);
@@ -604,7 +608,3 @@ async function downloadAllMarkdown() {
         a.href = url;
         a.download = `ocr_results_${totalPages}pages_${new Date().getTime()}.md`;
         a.click();
-        URL.revokeObjectURL(url);
-    }
-}
-
