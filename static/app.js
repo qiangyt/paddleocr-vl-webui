@@ -3,6 +3,13 @@ const API_BASE = '/api';
 let availableModel = 'PaddleOCR-VL-Pipeline'; // Default model name for UI
 const PROMPT_TEXT = ""; // Not used in pipeline mode
 
+// Configure marked.js with LaTeX support
+marked.setOptions({
+    breaks: true,
+    gfm: true,
+    sanitize: false
+});
+
 // State
 let processQueue = [];
 let isProcessing = false;
@@ -21,12 +28,16 @@ const resultsContainer = document.getElementById('results-container');
 const statusDot = document.getElementById('model-status-dot');
 const statusText = document.getElementById('model-status-text');
 const progressText = document.getElementById('progress-text');
+const selectAllBtn = document.getElementById('select-all-btn');
+const selectNoneBtn = document.getElementById('select-none-btn');
 const clearBtn = document.getElementById('clear-all-btn');
 const downloadAllBtn = document.getElementById('download-all-btn');
 const startBtn = document.getElementById('start-btn');
 const chartRecognitionSwitch = document.getElementById('chart-recognition-switch');
 const docUnwarpingSwitch = document.getElementById('doc-unwarping-switch');
 const docOrientationSwitch = document.getElementById('doc-orientation-switch');
+const toggleOptionsBtn = document.getElementById('toggle-options-btn');
+const ocrOptionsContainer = document.getElementById('ocr-options-container');
 
 // 多页视图元素
 const singleViewBtn = document.getElementById('single-page-btn');
@@ -48,6 +59,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     await checkBackendConnection();
     setupEventListeners();
+    // 初始化解析选项折叠功能
+    initOcrOptionsToggle();
 });
 
 async function checkBackendConnection() {
@@ -74,6 +87,9 @@ async function checkBackendConnection() {
 }
 
 function setupEventListeners() {
+    // 解析选项折叠按钮
+    toggleOptionsBtn.addEventListener('click', toggleOcrOptions);
+    
     // Drag & Drop
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -99,9 +115,11 @@ function setupEventListeners() {
     });
 
     // Actions
-    clearBtn.addEventListener('click', clearQueue);
-    downloadAllBtn.addEventListener('click', downloadAllMarkdown);
-    startBtn.addEventListener('click', startProcessing);
+clearBtn.addEventListener('click', clearQueue);
+downloadAllBtn.addEventListener('click', downloadAllMarkdown);
+startBtn.addEventListener('click', startProcessing);
+selectAllBtn.addEventListener('click', selectAll);
+selectNoneBtn.addEventListener('click', selectNone);
 
     // 视图切换（添加空值检查）
     if (singleViewBtn) singleViewBtn.addEventListener('click', () => switchView('single'));
@@ -113,6 +131,30 @@ function setupEventListeners() {
 
     // 粘贴图片功能
     document.addEventListener('paste', handlePaste);
+}
+
+// 初始化OCR选项折叠功能
+function initOcrOptionsToggle() {
+    if (toggleOptionsBtn && ocrOptionsContainer) {
+        // 确保初始状态是折叠的
+        ocrOptionsContainer.classList.add('hidden');
+        toggleOptionsBtn.textContent = '▶';
+    }
+}
+
+// 切换OCR选项显示
+function toggleOcrOptions() {
+    if (ocrOptionsContainer && toggleOptionsBtn) {
+        const isHidden = ocrOptionsContainer.classList.toggle('hidden');
+        // 更新按钮图标和旋转效果
+        if (isHidden) {
+            toggleOptionsBtn.textContent = '▶';
+            toggleOptionsBtn.classList.remove('rotated');
+        } else {
+            toggleOptionsBtn.textContent = '▼';
+            toggleOptionsBtn.classList.add('rotated');
+        }
+    }
 }
 
 // 处理粘贴事件
@@ -227,6 +269,11 @@ function renderQueueItem(item) {
     const el = clone.querySelector('.queue-item');
     el.id = `queue-${item.id}`;
     
+    // Set checkbox
+    const checkbox = el.querySelector('.queue-checkbox');
+    checkbox.dataset.itemId = item.id;
+    checkbox.checked = true; // 默认选中
+    
     // Truncate long names for vertical cards (more space available)
     let displayName = item.name;
     if (displayName.length > 25) {
@@ -257,7 +304,16 @@ function updateQueueProgress() {
 async function processNextInQueue() {
     if (isProcessing || processQueue.length === 0) return;
 
-    const itemIndex = processQueue.findIndex(i => i.status === 'pending');
+    // Get the next selected and pending item
+    const itemIndex = processQueue.findIndex(item => {
+        if (item.status !== 'pending') return false;
+        // Check if the item is selected
+        const el = document.getElementById(`queue-${item.id}`);
+        if (!el) return false;
+        const checkbox = el.querySelector('.queue-checkbox');
+        return checkbox && checkbox.checked;
+    });
+    
     if (itemIndex === -1) {
         // All done - remove processing state from queue section
         queueSection.classList.remove('processing');
@@ -379,14 +435,81 @@ function renderResult(item) {
     const card = clone.querySelector('.result-card');
     
     card.querySelector('.page-number').textContent = item.name;
-    card.querySelector('.image-preview img').src = item.dataUrl;
+    const img = card.querySelector('.image-preview img');
+    img.src = item.dataUrl;
     
-    // Render markdown using marked.js
-    const mdHtml = marked.parse(item.markdown || '(无内容)');
-    card.querySelector('.markdown-preview').innerHTML = mdHtml;
+    // 确保图片加载完成后调整大小
+    img.onload = function() {
+        // 直接设置图片样式，确保正确的尺寸
+        this.style.width = '100%';
+        this.style.maxWidth = '100%';
+        this.style.height = 'auto';
+        this.style.maxHeight = 'calc(100% - 30px)';
+        this.style.objectFit = 'contain';
+    };
+    
+    // 添加放大功能事件监听
+    setupZoomFunctionality(card, img);
+    
+    // Get elements
+    const markdownPreview = card.querySelector('.markdown-preview');
+    const markdownEditor = card.querySelector('.markdown-editor');
+    const togglePreviewBtn = card.querySelector('.toggle-preview');
+    const toggleEditBtn = card.querySelector('.toggle-edit');
+    const copyBtn = card.querySelector('.copy-btn');
+    
+    // Set initial editor content
+    markdownEditor.value = item.markdown || '(无内容)';
+    
+    // Render markdown function
+    const renderMarkdown = () => {
+        const content = markdownEditor.value;
+        const mdHtml = marked.parse(content);
+        markdownPreview.innerHTML = mdHtml;
+        
+        // Render LaTeX equations with KaTeX
+        if (markdownPreview) {
+            renderMathInElement(markdownPreview, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false}
+                ]
+            });
+        }
+        
+        // Update item's markdown
+        item.markdown = content;
+        
+        // Update multi-page view if needed
+        if (currentView === 'multi') {
+            updateMultiPageView();
+        }
+    };
+    
+    // Initial render
+    renderMarkdown();
+    
+    // Setup mode toggle buttons
+    togglePreviewBtn.addEventListener('click', () => {
+        togglePreviewBtn.classList.add('active');
+        toggleEditBtn.classList.remove('active');
+        markdownPreview.classList.remove('hidden');
+        markdownEditor.classList.add('hidden');
+        renderMarkdown(); // Update preview from editor content
+    });
+    
+    toggleEditBtn.addEventListener('click', () => {
+        toggleEditBtn.classList.add('active');
+        togglePreviewBtn.classList.remove('active');
+        markdownEditor.classList.remove('hidden');
+        markdownPreview.classList.add('hidden');
+        markdownEditor.focus();
+    });
+    
+    // Update markdown in real-time when editing
+    markdownEditor.addEventListener('input', renderMarkdown);
     
     // Setup copy button
-    const copyBtn = card.querySelector('.copy-btn');
     copyBtn.addEventListener('click', () => {
         navigator.clipboard.writeText(item.markdown).then(() => {
             copyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" fill="none" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>';
@@ -398,6 +521,71 @@ function renderResult(item) {
     
     resultsContainer.appendChild(card);
     updateQueueProgress();
+}
+
+// 设置图片放大功能
+function setupZoomFunctionality(card, imgElement) {
+    const zoomBtn = card.querySelector('.zoom-btn');
+    const zoomPreview = card.querySelector('.zoom-preview');
+    const zoomPreviewContent = card.querySelector('.zoom-preview-content');
+    const zoomCloseBtn = card.querySelector('.zoom-close-btn');
+    let isZoomEnabled = false;
+    
+    // 设置放大预览内容
+    zoomPreviewContent.style.backgroundImage = `url('${imgElement.src}')`;
+    
+    // 关闭放大预览的函数
+    function closeZoomPreview() {
+        isZoomEnabled = false;
+        zoomBtn.classList.remove('active');
+        zoomPreview.style.display = 'none';
+        imgElement.style.cursor = 'default';
+    }
+    
+    // 放大按钮点击事件
+    zoomBtn.addEventListener('click', () => {
+        isZoomEnabled = !isZoomEnabled;
+        zoomBtn.classList.toggle('active');
+        
+        if (isZoomEnabled) {
+            zoomPreview.style.display = 'block';
+            imgElement.style.cursor = 'crosshair';
+        } else {
+            zoomPreview.style.display = 'none';
+            imgElement.style.cursor = 'default';
+        }
+    });
+    
+    // 关闭按钮点击事件
+    zoomCloseBtn.addEventListener('click', closeZoomPreview);
+    
+    // 鼠标移动事件
+    imgElement.addEventListener('mousemove', (e) => {
+        if (!isZoomEnabled) return;
+        
+        const imgRect = imgElement.getBoundingClientRect();
+        const x = e.clientX - imgRect.left;
+        const y = e.clientY - imgRect.top;
+        
+        // 计算鼠标在图片上的百分比位置
+        const xPercent = (x / imgRect.width) * 100;
+        const yPercent = (y / imgRect.height) * 100;
+        
+        // 设置放大预览的背景位置
+        zoomPreviewContent.style.backgroundPosition = `${xPercent}% ${yPercent}%`;
+        
+        // 调整放大预览窗口中图片的宽度，使其与预览窗口一样宽
+        const previewWidth = zoomPreview.offsetWidth;
+        const aspectRatio = imgElement.naturalHeight / imgElement.naturalWidth;
+        const previewHeight = previewWidth * aspectRatio;
+        
+        zoomPreviewContent.style.backgroundSize = `${previewWidth}px ${previewHeight}px`;
+    });
+    
+    // 移除鼠标离开图片时自动关闭的行为
+    // 移除鼠标进入图片事件
+    // 移除鼠标离开预览窗口事件
+    // 移除鼠标进入预览窗口事件
 }
 
 function clearQueue() {
@@ -423,6 +611,22 @@ function clearQueue() {
     
     queueSection.classList.add('hidden');
     updateQueueProgress();
+}
+
+// 全选功能
+function selectAll() {
+    const checkboxes = document.querySelectorAll('.queue-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = true;
+    });
+}
+
+// 全不选功能
+function selectNone() {
+    const checkboxes = document.querySelectorAll('.queue-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+    });
 }
 
 // 切换视图
@@ -472,7 +676,16 @@ function updateMultiPageView() {
     const mergedMarkdown = processedResults.map(result => result.markdown).join('\n\n---\n\n');
     
     // 更新预览和源码
-    if (mdPreview) mdPreview.innerHTML = marked.parse(mergedMarkdown);
+    if (mdPreview) {
+        mdPreview.innerHTML = marked.parse(mergedMarkdown);
+        // Render LaTeX equations with KaTeX
+        renderMathInElement(mdPreview, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ]
+        });
+    }
     if (mdSource) {
         const codeElement = mdSource.querySelector('code.markdown');
         if (codeElement) codeElement.textContent = mergedMarkdown;
@@ -608,3 +821,15 @@ async function downloadAllMarkdown() {
         a.href = url;
         a.download = `ocr_results_${totalPages}pages_${new Date().getTime()}.md`;
         a.click();
+        URL.revokeObjectURL(url);
+        
+        // Reset button
+        downloadAllBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        下载`;
+        downloadAllBtn.disabled = false;
+    }
+}
