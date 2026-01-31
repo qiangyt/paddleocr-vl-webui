@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PaddleOCR-VL API 服务（后端核心）
   paddleocr-vl-api:

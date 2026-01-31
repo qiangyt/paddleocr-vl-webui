@@ -33,7 +33,7 @@ EOF
 fi
 
 echo "📦 拉取 PaddleOCR-VL 基础镜像..."
-docker compose --env-file env.txt pull
+docker compose --env-file env.txt pull paddleocr-vl-api paddleocr-vlm-server
 
 echo "🔨 构建前端服务镜像..."
 docker compose --env-file env.txt build pandocr-web
