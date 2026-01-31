@@ -39,8 +39,8 @@ async def get_models():
 class OCRRequest(BaseModel):
     image: str # Base64 string
     useLayoutDetection: bool = True
-    useDocUnwarping: bool = False  # Match app.py default
-    useDocOrientationClassify: bool = False  # Match app.py default
+    useDocUnwarping: bool = False  # Default to False as per user request
+    useDocOrientationClassify: bool = False  # Default to False as per user request
     useChartRecognition: bool = False
 
 @app.post("/api/ocr")
@@ -67,6 +67,7 @@ async def proxy_ocr(request: OCRRequest):
             payload["useChartRecognition"] = True
         
         print(f"Sending request to Pipeline Service at {PADDLE_SERVICE_URL}...")
+        print(f"Full request payload: {payload}")
         
         async with httpx.AsyncClient(timeout=180.0) as client:
             resp = await client.post(
